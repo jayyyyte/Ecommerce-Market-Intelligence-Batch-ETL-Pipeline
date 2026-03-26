@@ -4,7 +4,6 @@ __pycache__/
 *.pyo
 *.pyd
 *.so
-.python-version
 .pytest_cache/
 .mypy_cache/
 .coverage
@@ -16,18 +15,17 @@ htmlcov/
 venv/
 env/
 
-# Environment variables
+# Environment files
 .env
 .env.local
 
 # Airflow
+logs/
 airflow.cfg
 airflow.db
 airflow-webserver.pid
-logs/
-plugins/__pycache__/
 
-# Project runtime folders
+# Project runtime dirs
 staging/
 archive/
 
@@ -40,7 +38,7 @@ Thumbs.db
 # Jupyter
 .ipynb_checkpoints/
 
-# Build / packaging
+# Build artifacts
 build/
 dist/
 *.egg-info/
