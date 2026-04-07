@@ -16,9 +16,14 @@ x-airflow-common: &airflow-common
     AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY}
     AIRFLOW_UID: ${AIRFLOW_UID}
     _PIP_ADDITIONAL_REQUIREMENTS: ""
+    # Expose DB vars so scripts/init_db.py and scripts/setup_airflow_connections.py
+    # can read them without needing python-dotenv inside the container.
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: "5432"
   volumes:
     - ./dags:/opt/airflow/dags
     - ./etl:/opt/airflow/etl
+    - ./scripts:/opt/airflow/scripts      # ← scripts/ now available inside container
     - ./tests:/opt/airflow/tests
     - ./sql:/opt/airflow/sql
     - ./config:/opt/airflow/config
@@ -43,7 +48,9 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./sql:/docker-entrypoint-initdb.d/sql:ro
+      # 00_init_databases.sql runs automatically on first container start
+      # and creates the airflow_db and metabaseappdb databases.
+      - ./sql/00_init_databases.sql:/docker-entrypoint-initdb.d/00_init_databases.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -64,7 +71,10 @@ services:
           --lastname ${AIRFLOW_ADMIN_LASTNAME} \
           --role Admin \
           --email ${AIRFLOW_ADMIN_EMAIL} \
-          --password ${AIRFLOW_ADMIN_PASSWORD}
+          --password ${AIRFLOW_ADMIN_PASSWORD} && \
+        echo "✅  Airflow initialised." && \
+        python /opt/airflow/scripts/init_db.py && \
+        python /opt/airflow/scripts/setup_airflow_connections.py
     restart: "no"
 
   airflow-webserver:
