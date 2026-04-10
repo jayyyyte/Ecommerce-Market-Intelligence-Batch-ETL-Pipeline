@@ -36,12 +36,12 @@ except ImportError:
 
 import sqlalchemy as sa
 from sqlalchemy import text
-
+from sqlalchemy.engine import Engine
 
 # ---------------------------------------------------------------------------
 # Build the connection URL from environment variables
 # ---------------------------------------------------------------------------
-def get_engine() -> sa.Engine:
+def get_engine() -> Engine:
     user     = os.environ.get("POSTGRES_USER",     "etl_user")
     password = os.environ.get("POSTGRES_PASSWORD", "etl_password")
     host     = os.environ.get("POSTGRES_HOST",     "localhost")
@@ -55,7 +55,7 @@ def get_engine() -> sa.Engine:
 # ---------------------------------------------------------------------------
 # Run the DDL file
 # ---------------------------------------------------------------------------
-def init_schema(engine: sa.Engine) -> None:
+def init_schema(engine: Engine) -> None:
     if not SQL_FILE.exists():
         print(f"❌  SQL file not found: {SQL_FILE}", file=sys.stderr)
         sys.exit(1)
@@ -71,7 +71,7 @@ def init_schema(engine: sa.Engine) -> None:
 # ---------------------------------------------------------------------------
 # Verify the tables were created
 # ---------------------------------------------------------------------------
-def verify_tables(engine: sa.Engine) -> None:
+def verify_tables(engine: Engine) -> None:
     expected = {"pipeline_runs", "products_market", "rejected_records"}
 
     with engine.connect() as conn:
@@ -97,7 +97,7 @@ def verify_tables(engine: sa.Engine) -> None:
 # ---------------------------------------------------------------------------
 # Index verification
 # ---------------------------------------------------------------------------
-def verify_indexes(engine: sa.Engine) -> None:
+def verify_indexes(engine: Engine) -> None:
     expected_indexes = [
         "uq_products_market_key",
         "idx_products_category",
@@ -150,7 +150,7 @@ def main() -> None:
     verify_tables(engine)
     verify_indexes(engine)
 
-    print("🎉  Day 3 complete — PostgreSQL schema is ready!\n")
+    print("PostgreSQL schema is ready!\n")
 
 
 if __name__ == "__main__":
