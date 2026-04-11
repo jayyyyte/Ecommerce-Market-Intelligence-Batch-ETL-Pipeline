@@ -2,7 +2,6 @@
 etl/config.py
 -------------
 Central configuration module for the E-Commerce ETL pipeline.
-
 Priority order for every setting:
   1. Airflow Variable  (when running inside an Airflow task)
   2. Environment variable  (Docker / shell / .env file)

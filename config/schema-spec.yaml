@@ -1,0 +1,110 @@
+# ============================================================
+# Schema Specification — FakeStoreAPI Data Source
+# Used by: etl/transformer.py (Pandera validation)
+#          etl/extractor.py  (validate_response)
+# ============================================================
+
+source: fakestore_api
+version: "1.0"
+
+# Raw fields returned directly by FakeStoreAPI (before any transformation)
+raw_fields:
+  id:
+    type: integer
+    nullable: false
+    description: "External product ID from source"
+  title:
+    type: string
+    nullable: false
+    description: "Product display name"
+  price:
+    type: float
+    nullable: false
+    min: 0.0
+    description: "Product price in USD"
+  description:
+    type: string
+    nullable: true
+    description: "Long-form product description"
+  category:
+    type: string
+    nullable: true
+    description: "Raw category string from source"
+  image:
+    type: string
+    nullable: true
+    description: "Product image URL"
+  rating.rate:
+    type: float
+    nullable: true
+    min: 0.0
+    max: 5.0
+    description: "Average customer rating (nested in API response)"
+  rating.count:
+    type: integer
+    nullable: true
+    min: 0
+    description: "Total number of reviews (nested in API response)"
+
+# Target schema after transformation — what must exist in products_market
+transformed_columns:
+  product_id:
+    type: string
+    nullable: false
+    description: "Stringified source ID, e.g. '42'"
+  name:
+    type: string
+    nullable: false
+    max_length: 500
+  category:
+    type: string
+    nullable: true
+    pattern: "^[a-z0-9_]+$"   # lowercase_underscore after normalisation
+  price:
+    type: float
+    nullable: false
+    min: 0.01
+    precision: 2
+  rating:
+    type: float
+    nullable: true
+    min: 0.0
+    max: 5.0
+  review_count:
+    type: integer
+    nullable: false
+    min: 0
+    default: 0
+  stock_status:
+    type: string
+    nullable: false
+    allowed_values: ["in_stock", "out_of_stock", "unknown"]
+    default: "unknown"
+  source:
+    type: string
+    nullable: false
+    allowed_values: ["fakestore_api", "tiki_api", "shopee_scrape"]
+  source_url:
+    type: string
+    nullable: true
+  extraction_date:
+    type: date
+    nullable: false
+  pipeline_run_id:
+    type: string   # UUID
+    nullable: true
+
+# Columns that MUST be non-null for a row to be accepted
+critical_fields:
+  - product_id
+  - price
+  - name
+  - source
+  - extraction_date
+
+# Pagination details (used by extractor pagination logic)
+pagination:
+  style: limit_offset      # FakeStoreAPI supports ?limit=N
+  default_limit: 20        # max items FakeStoreAPI returns
+  max_pages: 10            # safety ceiling — FakeStoreAPI only has ~20 products
+  supports_offset: false   # FakeStoreAPI has no real offset; we fetch all at once
