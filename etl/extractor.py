@@ -29,7 +29,6 @@ No auth required. Rate-limit: none enforced, but we add delays for good practice
 
 import json
 import logging
-import os
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -50,6 +49,8 @@ logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants
+# ---------------------------------------------------------------------------
+
 FAKESTORE_BASE_URL = "https://fakestoreapi.com"
 FAKESTORE_PRODUCTS_ENDPOINT = "/products"
 DEFAULT_USER_AGENT = (
@@ -62,6 +63,8 @@ INTER_REQUEST_DELAY = 1.0     # seconds between paginated requests (polite crawl
 
 # ---------------------------------------------------------------------------
 # Base class
+# ---------------------------------------------------------------------------
+
 class BaseExtractor(ABC):
     """
     Abstract base class for all data-source extractors.
@@ -119,6 +122,8 @@ class BaseExtractor(ABC):
 
     # ------------------------------------------------------------------
     # Shared helpers available to all subclasses
+    # ------------------------------------------------------------------
+
     def _make_staging_path(self, execution_date: str, filename: str) -> Path:
         """Build and create the staging directory for a given date."""
         directory = self.staging_dir / execution_date
@@ -141,6 +146,8 @@ class BaseExtractor(ABC):
 
 # ---------------------------------------------------------------------------
 # FakeStoreAPI extractor
+# ---------------------------------------------------------------------------
+
 class FakeStoreExtractor(BaseExtractor):
     """
     Extractor for https://fakestoreapi.com — used for development / CI.
@@ -155,8 +162,10 @@ class FakeStoreExtractor(BaseExtractor):
 
     SOURCE_NAME = "fakestore_api"
     PRODUCTS_URL = f"{FAKESTORE_BASE_URL}{FAKESTORE_PRODUCTS_ENDPOINT}"
-    PAGE_LIMIT = 20          # items per page request
-    MAX_PAGES = 10           # safety ceiling
+    PAGE_LIMIT = 20          # max items to request; FakeStore catalogue fits in one page
+    # NOTE: FakeStoreAPI has no true offset support — the same 20 products are
+    # returned regardless of any skip/page param, so we do a single fetch only.
+    # For a source with real pagination, replace extract() with an offset loop.
 
     def __init__(
         self,
@@ -180,9 +189,13 @@ class FakeStoreExtractor(BaseExtractor):
         """
         Fetch all products from FakeStoreAPI and return enriched records.
 
+        FakeStoreAPI does not support true offset pagination — the same 20
+        products are returned on every page regardless of any skip param.
+        We therefore perform a single request to avoid duplicating rows.
+
         Steps
         -----
-        1. Paginate through all available products.
+        1. Fetch all products in one request (?limit=PAGE_LIMIT).
         2. Append extraction_timestamp, source, source_url, pipeline_run_id.
         3. Save raw JSON to staging/<execution_date>/raw_products.json.
         4. Return the list of enriched records.
@@ -195,39 +208,9 @@ class FakeStoreExtractor(BaseExtractor):
         )
 
         start_time = time.monotonic()
-        all_records: list[dict] = []
 
-        # --- Pagination loop ---
-        for page in range(self.MAX_PAGES):
-            page_start = time.monotonic()
-            page_records = self._fetch_page(page)
-
-            if not page_records:
-                logger.info("[extract] Empty response on page %d — stopping.", page)
-                break
-
-            logger.info(
-                "[extract] Page %d: fetched %d rows (%.2f s)",
-                page,
-                len(page_records),
-                time.monotonic() - page_start,
-            )
-            all_records.extend(page_records)
-
-            # FakeStoreAPI returns the same ~20 products regardless of offset.
-            # If the page count < PAGE_LIMIT, we've reached the end.
-            if len(page_records) < self.PAGE_LIMIT:
-                logger.info(
-                    "[extract] Page %d returned %d < %d items — last page reached.",
-                    page,
-                    len(page_records),
-                    self.PAGE_LIMIT,
-                )
-                break
-
-            # Polite delay between requests (SRS FR-E06)
-            if page < self.MAX_PAGES - 1:
-                time.sleep(INTER_REQUEST_DELAY)
+        # Single fetch — FakeStore has no real offset support
+        all_records = self._fetch_page(0)
 
         elapsed = time.monotonic() - start_time
         logger.info(
@@ -355,9 +338,13 @@ class FakeStoreExtractor(BaseExtractor):
             "description": raw.get("description"),
             "rating": rating_obj.get("rate"),
             "review_count": rating_obj.get("count", 0),
-            "stock_status": "in_stock",   # FakeStoreAPI has no stock field; default
+            # FakeStoreAPI has no stock field → default to "unknown" (aligns with
+            # schema_spec.yaml and transformer fill_defaults step)
+            "stock_status": "unknown",
             "source": self.SOURCE_NAME,
-            "source_url": raw.get("image"),    # closest URL available in FakeStore
+            # FakeStore has no product-page URL; image URL is the closest proxy.
+            # Renamed mentally: treat source_url as "canonical asset URL" for this source.
+            "source_url": raw.get("image"),
             "extraction_timestamp": extraction_timestamp,
             "extraction_date": execution_date,
             "pipeline_run_id": run_id,

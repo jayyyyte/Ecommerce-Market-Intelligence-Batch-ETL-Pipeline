@@ -1,8 +1,5 @@
 """
-tests/test_extractor.py
------------------------
 Unit tests for etl/extractor.py and utils/retry.py.
-
 All HTTP calls are mocked — no live network required (CI/CD safe).
 
 Test coverage
@@ -22,10 +19,12 @@ FakeStoreExtractor
   ✓ validate_response() rejects non-list response
   ✓ validate_response() rejects list missing required keys
   ✓ validate_response() returns False for empty list
-  ✓ extract() stops pagination when page < PAGE_LIMIT items returned
+  ✓ extract() performs exactly ONE HTTP call (no false pagination loop)
+  ✓ extract() with exactly PAGE_LIMIT=20 items does NOT duplicate rows
   ✓ save_raw() writes atomic JSON file and returns correct path
   ✓ _enrich_record() flattens nested rating fields
-  ✓ _enrich_record() defaults stock_status and review_count
+  ✓ _enrich_record() defaults stock_status to "unknown" (aligns with schema_spec)
+  ✓ _enrich_record() defaults review_count to 0 when missing
   ✓ HTTP 429 raises RateLimitError (via raise_for_status_with_context)
   ✓ HTTP 503 raises ServerError
   ✓ HTTP 404 raises ExtractionError (non-retryable)
@@ -33,10 +32,9 @@ FakeStoreExtractor
 
 import json
 import sys
-import time
 import uuid
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
@@ -323,7 +321,8 @@ class TestEnrichRecord:
         enriched = extractor._enrich_record(
             SAMPLE_PRODUCT, "ts", EXECUTION_DATE, RUN_ID
         )
-        assert enriched["stock_status"] == "in_stock"
+        # Must be "unknown" — FakeStore has no stock field; schema_spec default = "unknown"
+        assert enriched["stock_status"] == "unknown"
 
     def test_missing_rating_defaults_gracefully(self, extractor):
         product_no_rating = {**SAMPLE_PRODUCT, "rating": None}
@@ -395,10 +394,10 @@ class TestExtract:
         assert all(r["extraction_date"] == EXECUTION_DATE for r in results)
 
     @patch("time.sleep", return_value=None)
-    def test_stops_pagination_when_fewer_than_limit(self, mock_sleep, extractor):
+    def test_extract_makes_exactly_one_http_call(self, mock_sleep, extractor):
         """
-        When the page returns < PAGE_LIMIT items, the loop should stop.
-        With 2 products < PAGE_LIMIT=20, we expect exactly 1 HTTP call.
+        FakeStore has no real offset — extract() must call the API exactly
+        once regardless of how many items are returned.
         """
         mock_resp = make_mock_response(200, [SAMPLE_PRODUCT, SAMPLE_PRODUCT_2])
 
@@ -406,6 +405,42 @@ class TestExtract:
             extractor.extract(EXECUTION_DATE, RUN_ID)
 
         assert mock_get.call_count == 1
+
+    @patch("utils.retry.time.sleep", return_value=None)
+    def test_exact_page_limit_does_not_duplicate(self, mock_sleep, extractor):
+        """
+        KEY REGRESSION TEST: when the API returns exactly PAGE_LIMIT=20 items,
+        the extractor must NOT loop and fetch again, producing 40 duplicate rows.
+        Expected: exactly 1 HTTP call, 20 unique rows.
+        """
+        sample_20 = [
+            {
+                "id": i + 1,
+                "title": f"Product {i + 1}",
+                "price": 10.0 + i,
+                "description": "x",
+                "category": "electronics",
+                "image": "https://example.com/a.jpg",
+                "rating": {"rate": 4.0, "count": 10},
+            }
+            for i in range(20)
+        ]
+
+        mock_resp = make_mock_response(200, sample_20)
+
+        with patch.object(extractor.session, "get", return_value=mock_resp) as mock_get:
+            results = extractor.extract(EXECUTION_DATE, RUN_ID)
+
+        # Core assertions
+        assert mock_get.call_count == 1, (
+            f"Expected 1 HTTP call, got {mock_get.call_count} — pagination loop duplicating data!"
+        )
+        assert len(results) == 20
+        # All product_ids must be unique — no duplicates
+        unique_ids = {r["product_id"] for r in results}
+        assert len(unique_ids) == 20, (
+            f"Expected 20 unique product_ids, got {len(unique_ids)} — duplicates present!"
+        )
 
     @patch("time.sleep", return_value=None)
     def test_saves_raw_file_to_staging(self, mock_sleep, extractor, tmp_path):
