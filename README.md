@@ -96,6 +96,31 @@ ecommerce-etl/
 ### Design Pattern
 Modular **Batch ETL** with staged responsibilities. Each module has a single job; modules communicate via Airflow XCom and the filesystem (staging directory), not direct function calls across DAG boundaries.
 
+### Flow
+```
+[FakeStoreAPI / Tiki]
+        │
+        ▼
+  [Extractor]          Python · requests · BeautifulSoup
+        │  raw JSON
+        ▼
+  [Staging Area]       staging/{date}/raw_*.json
+        │
+        ▼
+  [Transformer]        Pandas — clean, validate, deduplicate
+        │  clean DataFrame
+        ▼
+  [Loader]             SQLAlchemy — UPSERT into PostgreSQL
+        │
+        ▼
+  [PostgreSQL]         products_market · pipeline_runs · rejected_records
+        │
+        ▼
+  [Metabase]           Dashboards for analysts & stakeholders
+
+All steps orchestrated and monitored by Apache Airflow (DAG: ecommerce_market_etl)
+```
+
 ### Component Interaction
 
 ```
