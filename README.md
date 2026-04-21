@@ -169,39 +169,44 @@ All steps orchestrated and monitored by Apache Airflow (DAG: ecommerce_market_et
 
 ### 1. Clone the repository
 
-```bash
+Open **Command Prompt** or **PowerShell**:
+
+```
 git clone https://github.com/your-org/ecommerce-etl.git
 cd ecommerce-etl
 ```
 
 ### 2. Configure environment variables
 
-```bash
-cp .env.example .env
+**Command Prompt:**
+```
+copy .env.example .env
 ```
 
-Open `.env` and fill in:
+**PowerShell:**
+```
+Copy-Item .env.example .env
+```
 
-```bash
-# Generate a Fernet key:
+Open `.env` in Notepad or VS Code and fill in the values. To generate a Fernet key, run:
+
+```
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-
-AIRFLOW__CORE__FERNET_KEY=<paste generated key>
-AIRFLOW__WEBSERVER__SECRET_KEY=<any random string>
-SLACK_WEBHOOK_URL=<your Slack webhook URL, or leave empty>
 ```
+
+Paste the output as the value of `AIRFLOW__CORE__FERNET_KEY`. Set `AIRFLOW__WEBSERVER__SECRET_KEY` to any random string.
 
 ### 3. Start the stack
 
-```bash
-# First run — builds the image and initialises everything
+```
 docker compose up airflow-init
-
-# Start all services
 docker compose up -d
+```
 
-# Watch logs until scheduler is ready (usually 60–90 seconds)
-docker compose logs -f airflow-scheduler
+Watch logs until the scheduler is ready (usually 60-90 seconds):
+
+```
+docker compose logs airflow-scheduler
 ```
 
 ### 4. Verify
@@ -224,30 +229,28 @@ All 5 tasks should turn green. If any fail, see the [troubleshooting table](#tro
 
 ### Trigger a manual pipeline run
 
-```bash
-# Via Airflow UI: DAGs → ecommerce_market_etl → ▶ Trigger
-# Via CLI:
-docker exec airflow_scheduler \
-    airflow dags trigger ecommerce_market_etl
+Via Airflow UI: **DAGs → ecommerce_market_etl → Trigger DAG (play button)**
+
+Via CLI:
+```
+docker exec airflow_scheduler airflow dags trigger ecommerce_market_etl
 ```
 
 ### Backfill historical dates
 
-```bash
-docker exec airflow_scheduler \
-    airflow dags backfill \
-    --start-date 2025-06-01 \
-    --end-date 2025-06-14 \
-    ecommerce_market_etl
+```
+docker exec airflow_scheduler airflow dags backfill --start-date 2025-06-01 --end-date 2025-06-14 ecommerce_market_etl
 ```
 
 ### Query the data
 
-```bash
-# Open psql
+Open a psql session:
+```
 docker exec -it ecommerce_postgres psql -U etl_user -d ecommerce_db
+```
 
-# Example queries
+Once inside psql, run example queries:
+```sql
 SELECT category, AVG(price)::NUMERIC(10,2) AS avg_price
 FROM products_market
 GROUP BY category
@@ -257,6 +260,8 @@ SELECT * FROM pipeline_runs ORDER BY started_at DESC LIMIT 5;
 
 SELECT rejection_reason, COUNT(*) FROM rejected_records GROUP BY rejection_reason;
 ```
+
+Type `\q` to exit psql.
 
 ---
 
@@ -331,32 +336,54 @@ See `.env.example` for the full list. Key variables:
 
 ## Scripts / Commands
 
-```bash
-# ── Docker ────────────────────────────────────────────────────────────────────
-docker compose up -d                    # Start all services
-docker compose down                     # Stop all services (data preserved)
-docker compose down -v                  # Full reset (destroys DB volume)
-docker compose logs -f airflow-scheduler
+All commands below work in **Windows Command Prompt** and **PowerShell**.
 
-# ── Database ──────────────────────────────────────────────────────────────────
+**Docker**
+```
+docker compose up -d
+docker compose down
+docker compose down -v
+docker compose logs airflow-scheduler
+```
+
+**Database**
+```
 docker exec airflow_scheduler python /opt/airflow/scripts/init_db.py
 docker exec -it ecommerce_postgres psql -U etl_user -d ecommerce_db
+```
 
-# ── Airflow setup ─────────────────────────────────────────────────────────────
+**Airflow setup**
+```
 docker exec airflow_scheduler python /opt/airflow/scripts/setup_airflow_connections.py
 docker exec airflow_scheduler python /opt/airflow/scripts/setup_airflow_connections.py --overwrite
+```
 
-# ── Pipeline ──────────────────────────────────────────────────────────────────
+**Pipeline**
+```
 docker exec airflow_scheduler airflow dags trigger ecommerce_market_etl
 docker exec airflow_scheduler airflow dags backfill -s 2025-06-01 -e 2025-06-14 ecommerce_market_etl
+```
 
-# ── Testing ───────────────────────────────────────────────────────────────────
+**Testing (run from project root, virtual environment active)**
+```
+python -m pytest tests\ -v
+python -m pytest tests\ --cov=etl --cov-report=html
+```
+
+**Testing inside Docker**
+```
 docker exec airflow_scheduler pytest /opt/airflow/tests/ -v
-docker exec airflow_scheduler pytest /opt/airflow/tests/ --cov=etl --cov-report=html
 docker exec airflow_scheduler flake8 /opt/airflow/etl/ --max-line-length=120
+```
 
-# ── Fernet key generation ─────────────────────────────────────────────────────
+**Fernet key generation**
+```
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+**Security check — no hardcoded credentials (Command Prompt)**
+```
+findstr /s /i "password secret token apikey" etl\*.py utils\*.py dags\*.py
 ```
 
 ---
