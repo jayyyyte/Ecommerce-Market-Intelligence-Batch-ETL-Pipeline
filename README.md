@@ -4,7 +4,7 @@ Automated pipeline that collects, cleans, and stores e-commerce product data
 for market analysis. Runs daily via Apache Airflow, stores results in
 PostgreSQL, and exposes insights through a Metabase dashboard.
 
-**Stack:** Python · Apache Airflow · PostgreSQL · Metabase · Docker
+**Stack:** Python 3.11 · Apache Airflow · PostgreSQL · Metabase · Docker
 
 ---
 
@@ -12,23 +12,23 @@ PostgreSQL, and exposes insights through a Metabase dashboard.
 
 ```
 [FakeStoreAPI / Tiki]
-        │
-        ▼
-  [Extractor]          Python · requests · BeautifulSoup
-        │  raw JSON
-        ▼
-  [Staging Area]       staging/{date}/raw_*.json
-        │
-        ▼
-  [Transformer]        Pandas — clean, validate, deduplicate
-        │  clean DataFrame
-        ▼
-  [Loader]             SQLAlchemy — UPSERT into PostgreSQL
-        │
-        ▼
-  [PostgreSQL]         products_market · pipeline_runs · rejected_records
-        │
-        ▼
+        |
+        v
+  [Extractor]          Python, requests, BeautifulSoup
+        |  raw JSON
+        v
+  [Staging Area]       staging\{date}\raw_*.json
+        |
+        v
+  [Transformer]        Pandas -- clean, validate, deduplicate
+        |  clean DataFrame
+        v
+  [Loader]             SQLAlchemy -- UPSERT into PostgreSQL
+        |
+        v
+  [PostgreSQL]         products_market, pipeline_runs, rejected_records
+        |
+        v
   [Metabase]           Dashboards for analysts & stakeholders
 
 All steps orchestrated and monitored by Apache Airflow (DAG: ecommerce_market_etl)
@@ -36,299 +36,313 @@ All steps orchestrated and monitored by Apache Airflow (DAG: ecommerce_market_et
 
 ---
 
-## Quick Start
+## Quick Start (Python only, no Docker needed yet)
 
 ### Prerequisites
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (v24+)
-- [Docker Compose](https://docs.docker.com/compose/) (v2.20+)
-- Git
-- 4 GB RAM allocated to Docker (Airflow requires it)
+- Python 3.11 or later — https://www.python.org/downloads/
+- Git — https://git-scm.com/downloads
 
-### 1. Clone the repository
+### 1. Clone and enter the project
 
-```bash
+Open **Command Prompt** or **PowerShell**:
+
+```
 git clone https://github.com/your-org/ecommerce-etl.git
 cd ecommerce-etl
 ```
 
-### 2. Configure environment variables
+### 2. Create and activate a virtual environment
 
-```bash
-cp .env.example .env
+```
+python -m venv venv
+venv\Scripts\activate
 ```
 
-Open `.env` and fill in the required values:
+Your prompt will show `(venv)` when the environment is active.
 
-```dotenv
-# PostgreSQL
-POSTGRES_USER=etl_user
-POSTGRES_PASSWORD=your_secure_password_here
-POSTGRES_DB=ecommerce_db
+### 3. Install dependencies
 
-# Airflow
-AIRFLOW_UID=50000
-AIRFLOW__CORE__FERNET_KEY=          # generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-AIRFLOW__WEBSERVER__SECRET_KEY=     # any random string
-
-# Notifications (optional for Sprint 1)
-SLACK_WEBHOOK_URL=
+```
+pip install requests pytest pytest-mock beautifulsoup4 pyyaml
 ```
 
-### 3. Initialise and start the full stack
+### 4. Run the FakeStore extractor
 
-```bash
-# First-time setup: initialise the Airflow metadata DB and create the admin user
-docker compose up airflow-init
-
-# Start all services in the background
-docker compose up -d
+```
+python -m etl.extractor
 ```
 
-Wait ~60 seconds for services to become healthy, then verify:
+This fetches ~20 products from FakeStoreAPI and saves them locally. Look for a new folder under `staging\` named with today's date.
 
-| Service   | URL                    | Default credentials     |
-|-----------|------------------------|-------------------------|
-| Airflow   | http://localhost:8080  | admin / admin           |
-| Metabase  | http://localhost:3000  | set on first visit      |
-| PostgreSQL| localhost:5432         | from your `.env`        |
+### 5. Verify the file was created
 
-### 4. Initialise the database schema
-
-```bash
-# Run the schema creation script inside the running postgres container
-docker compose exec postgres psql \
-  -U $POSTGRES_USER \
-  -d $POSTGRES_DB \
-  -f /docker-entrypoint-initdb.d/create_tables.sql
-
-# Verify all 3 tables were created
-docker compose exec postgres psql \
-  -U $POSTGRES_USER \
-  -d $POSTGRES_DB \
-  -c "\dt"
+```
+dir staging
 ```
 
-Expected output:
-```
-             List of relations
- Schema |       Name        | Type  |  Owner
---------+-------------------+-------+---------
- public | pipeline_runs     | table | etl_user
- public | products_market   | table | etl_user
- public | rejected_records  | table | etl_user
-```
-
-### 5. Configure Airflow connections and variables
-
-In the Airflow UI (http://localhost:8080):
-
-**Add Connection** → Admin → Connections → (+):
-```
-Connection ID:   postgres_ecommerce
-Connection Type: Postgres
-Host:            postgres
-Schema:          ecommerce_db
-Login:           etl_user        (from .env)
-Password:        your_password   (from .env)
-Port:            5432
-```
-
-**Add Variables** → Admin → Variables → (+):
-
-| Key              | Value                          |
-|------------------|--------------------------------|
-| DATA_SOURCE_URL  | https://fakestoreapi.com       |
-| STAGING_DIR      | /opt/airflow/staging           |
-| SLACK_WEBHOOK_URL| (your webhook or leave empty)  |
-| MAX_RETRIES      | 3                              |
-| PIPELINE_ENV     | dev                            |
+You should see a folder like `2025-04-18`. Inside it: `raw_products.json`.
 
 ---
 
-## Running the Pipeline
+## Verifying the Retry Functionality
 
-### Manual trigger (development)
+The retry decorator in `utils\retry.py` handles network timeouts, HTTP 429, and HTTP 5xx errors automatically. There are two ways to verify it:
 
-```bash
-# Run FakeStore extractor directly — no Airflow needed
-python -m etl.extractor
+### Option A — Interactive demo script (quickest)
 
-# Run Tiki scraper (1 page, requires internet)
-python -m etl.tiki_scraper
+Simulates failures without any real server. Production delays (30 s, 60 s, 120 s) are compressed to 0.05 s, so the whole thing finishes in under 2 seconds:
 
-# Check staging output
-ls staging/$(date +%Y-%m-%d)/
+```
+python scripts\demo_retry.py
 ```
 
-### Via Airflow UI
+All 5 demos should print `>> PASS`. Here is what each one proves:
 
-1. Open http://localhost:8080
-2. Find DAG: `ecommerce_market_etl`
-3. Toggle the DAG **On** (top-left switch)
-4. Click ▶ (Trigger DAG) for an immediate run
-5. Watch the Graph View — all 5 tasks should turn green
+| Demo | What is being tested |
+|------|----------------------|
+| 1 | `requests.Timeout` on attempts 1 and 2, success on attempt 3 |
+| 2 | HTTP 429 triggers retry with a minimum 60 s delay (not the standard 30 s) |
+| 3 | HTTP 503 uses exponential backoff: 30 s then 60 s then 120 s |
+| 4 | After all retries are used up, the final exception is re-raised to the caller |
+| 5 | A 404 `ExtractionError` is NOT retried — it is a client-side bug, not transient |
 
-### Backfill past dates
+### Option B — Unit tests
 
-```bash
-docker compose exec airflow-scheduler \
-  airflow dags backfill \
-    --start-date 2025-04-01 \
-    --end-date   2025-04-10 \
-    ecommerce_market_etl
+84 tests covering every scenario with mocked HTTP calls (no real network needed):
+
 ```
+python -m pytest tests\ -v
+```
+
+To run only the retry-related tests:
+
+```
+python -m pytest tests\test_extractor.py::TestRetryWithBackoff -v
+```
+
+---
+
+## Running All Tests
+
+```
+python -m pytest tests\ -v
+```
+
+Run a single test file:
+
+```
+python -m pytest tests\test_extractor.py -v
+python -m pytest tests\test_tiki_scraper.py -v
+```
+
+Run a specific test by name:
+
+```
+python -m pytest tests\test_extractor.py::TestExtract::test_exact_page_limit_does_not_duplicate -v
+```
+
+With coverage (requires `pip install pytest-cov`):
+
+```
+python -m pytest tests\ --cov=etl --cov=utils --cov-report=term-missing
+```
+
+Security check — confirm no secrets are in source code:
+
+```
+findstr /s /i "password secret token apikey" etl\*.py utils\*.py dags\*.py
+```
+
+Expected: no output (no results found).
 
 ---
 
 ## Data Sources
 
-### Primary: FakeStoreAPI (Development / CI)
+### Primary: FakeStoreAPI
 
-- **URL:** https://fakestoreapi.com/products
-- **Type:** REST API (JSON)
-- **Auth:** None required
-- **Fields returned:** `id`, `title`, `price`, `description`, `category`, `image`, `rating.rate`, `rating.count`
-- **Pagination:** `?limit=N` — returns full catalogue (~20 products) in one call
-- **Rate limit:** None enforced; we default to polite 1 s delay anyway
-- **Why:** Stable, predictable schema — ideal for development and CI/CD pipelines
+URL: https://fakestoreapi.com/products  
+Free, stable, no authentication required. Used for development and CI.  
+Returns ~20 products in a single call (no real pagination).
 
-Field mapping to our schema:
+| FakeStore field | Schema field | Notes |
+|-----------------|--------------|-------|
+| `id`            | `product_id` | Converted to string |
+| `title`         | `name`       | |
+| `price`         | `price`      | USD |
+| `category`      | `category`   | Normalised in transformer |
+| `image`         | `source_url` | Image URL only — no product page URL available |
+| `rating.rate`   | `rating`     | Clipped to 0.0–5.0 |
+| `rating.count`  | `review_count` | |
 
-| FakeStore field | Our schema field | Notes                         |
-|-----------------|------------------|-------------------------------|
-| `id`            | `product_id`     | Stringified                   |
-| `title`         | `name`           |                               |
-| `price`         | `price`          | USD float                     |
-| `category`      | `category`       | Raw; normalised in transformer|
-| `image`         | `source_url`     | Image URL (no product page URL available) |
-| `rating.rate`   | `rating`         | Clipped to [0.0, 5.0]         |
-| `rating.count`  | `review_count`   |                               |
+### Bonus: Tiki scraper
 
-### Bonus: Tiki (Production Demo)
+Scrapes tiki.vn Laptop category using the site's own listing API plus BeautifulSoup. Includes 1.5 s delay between pages and User-Agent rotation.
 
-- **URL:** https://tiki.vn (category listing API)
-- **Type:** Semi-public JSON API + BeautifulSoup for HTML detail pages
-- **Auth:** None required for listing
-- **Category scraped (default):** Laptops (`category_id=8095`)
-- **Pagination:** `?page=N&limit=40` — true paginated offset
-- **Rate limit:** 1.5 s sleep between pages; User-Agent rotated from 5 real browser strings
-- **Risk:** API endpoints may change; use FakeStore for CI, Tiki only for demo runs
-- **Prices:** VND (Vietnamese Dong)
-
----
-
-## Testing
-
-### Run the full test suite
-
-```bash
-# Install test dependencies (local dev, outside Docker)
-pip install requests pytest pytest-mock beautifulsoup4 pyyaml
-
-# Run all tests with verbose output
-python -m pytest tests/ -v
-
-# Run with coverage report
-python -m pytest tests/ --cov=etl --cov=utils --cov-report=term-missing
+```
+python -m etl.tiki_scraper
 ```
 
-Expected output: **84 passed** (35 extractor + 49 tiki scraper tests)
-
-### Run a specific test class
-
-```bash
-# Just the retry decorator tests
-python -m pytest tests/test_extractor.py::TestRetryWithBackoff -v
-
-# Just the Tiki scraper integration tests
-python -m pytest tests/test_tiki_scraper.py::TestExtract -v
-
-# The key pagination non-duplication regression test
-python -m pytest tests/test_extractor.py::TestExtract::test_exact_page_limit_does_not_duplicate -v
-```
-
-### Security check — no hardcoded credentials
-
-```bash
-grep -r 'password\|secret\|token\|apikey' dags/ etl/ utils/ --include="*.py"
-# Expected: 0 results (all secrets are in .env / Airflow Variables)
-```
+Note: prices are in VND (Vietnamese Dong). Do not mix with FakeStore USD data in dashboards.
 
 ---
 
 ## Project Structure
 
 ```
-ecommerce-etl/
-├── dags/
-│   └── ecommerce_market_dag.py     # Airflow DAG (Sprint 3)
-├── etl/
-│   ├── extractor.py                # BaseExtractor + FakeStoreExtractor
-│   ├── tiki_scraper.py             # TikiScraper (bonus scraping source)
-│   ├── transformer.py              # Pandas cleaning pipeline (Sprint 2)
-│   ├── loader.py                   # PostgreSQL UPSERT loader (Sprint 2)
-│   └── notifier.py                 # Slack/email alerts (Sprint 3)
-├── utils/
-│   └── retry.py                    # @retry_with_backoff decorator
-├── tests/
-│   ├── test_extractor.py           # 35 tests — FakeStore + retry
-│   ├── test_tiki_scraper.py        # 49 tests — Tiki scraper
-│   ├── test_transformer.py         # (Sprint 2)
-│   └── test_loader.py              # (Sprint 2)
-├── sql/
-│   ├── create_tables.sql           # Schema DDL (3 tables)
-│   └── queries/                    # Analysis SQL queries (Sprint 4)
-├── config/
-│   └── schema_spec.yaml            # Expected column types for validation
-├── staging/                        # Raw extracted files per date
-├── logs/                           # Airflow / pipeline logs
-├── docker-compose.yml
-├── Dockerfile
-├── requirements.txt
-├── .env.example
-└── README.md
+ecommerce-etl\
+|-- dags\
+|   |-- ecommerce_market_dag.py     Airflow DAG (Sprint 3)
+|-- etl\
+|   |-- extractor.py                BaseExtractor + FakeStoreExtractor
+|   |-- tiki_scraper.py             TikiScraper
+|   |-- transformer.py              Pandas cleaning pipeline (Sprint 2)
+|   |-- loader.py                   PostgreSQL UPSERT loader (Sprint 2)
+|   |-- notifier.py                 Slack/email alerts (Sprint 3)
+|-- utils\
+|   |-- retry.py                    @retry_with_backoff decorator
+|-- scripts\
+|   |-- demo_retry.py               Interactive retry verification
+|-- tests\
+|   |-- test_extractor.py           35 tests
+|   |-- test_tiki_scraper.py        49 tests
+|-- config\
+|   |-- schema_spec.yaml            Column types for validation
+|-- staging\                        Raw extracted files (git-ignored)
+|-- sql\
+|   |-- create_tables.sql           Schema DDL (3 tables)
+|-- README.md
+|-- requirements.txt
+|-- .env.example
+```
+
+---
+
+## Docker + Airflow Setup (Sprint 3)
+
+These steps require Docker Desktop to be installed and running.
+
+### Copy and fill in environment variables
+
+```
+copy .env.example .env
+```
+
+Open `.env` in Notepad or VS Code and fill in the values. To generate a Fernet key for Airflow:
+
+```
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Paste the output as the value of `AIRFLOW__CORE__FERNET_KEY` in `.env`.
+
+### Start the full stack
+
+```
+docker compose up airflow-init
+docker compose up -d
+```
+
+Wait about 60 seconds. Services will be available at:
+
+| Service | URL | Default login |
+|---------|-----|---------------|
+| Airflow | http://localhost:8080 | admin / admin123 |
+| Metabase | http://localhost:3000 | Set on first visit |
+| PostgreSQL | localhost:5432 | From your .env file |
+
+### Create database tables
+
+```
+docker exec airflow_scheduler python /opt/airflow/scripts/init_db.py
+```
+
+### Verify tables exist
+
+```
+docker exec -it ecommerce_postgres psql -U etl_user -d ecommerce_db -c "\dt"
+```
+
+Expected: `pipeline_runs`, `products_market`, `rejected_records`.
+
+### Configure Airflow connections and variables
+
+```
+docker exec airflow_scheduler python /opt/airflow/scripts/setup_airflow_connections.py
+```
+
+### Trigger a manual DAG run
+
+```
+docker exec airflow_scheduler airflow dags trigger ecommerce_market_etl
+```
+
+### Backfill past dates
+
+```
+docker exec airflow_scheduler airflow dags backfill --start-date 2025-04-01 --end-date 2025-04-10 ecommerce_market_etl
+```
+
+### Query the database directly
+
+```
+docker exec -it ecommerce_postgres psql -U etl_user -d ecommerce_db
+```
+
+Once inside psql, example queries:
+
+```sql
+SELECT category, AVG(price)::NUMERIC(10,2) AS avg_price
+FROM products_market
+GROUP BY category
+ORDER BY avg_price DESC;
+
+SELECT * FROM pipeline_runs ORDER BY started_at DESC LIMIT 5;
+
+SELECT rejection_reason, COUNT(*) FROM rejected_records GROUP BY rejection_reason;
+```
+
+Type `\q` to exit psql.
+
+### Stop all services
+
+```
+docker compose down
+```
+
+### Full reset including database
+
+```
+docker compose down -v
 ```
 
 ---
 
 ## Troubleshooting
 
-**Airflow UI not reachable at localhost:8080**
-```bash
-docker compose ps          # check all containers are healthy
-docker compose logs airflow-webserver --tail=50
+**`python -m etl.extractor` gives `ModuleNotFoundError`**  
+Make sure you are inside the `ecommerce-etl` folder when you run the command, and that your virtual environment is active (look for `(venv)` in your prompt).
+
+**`venv\Scripts\activate` is blocked by PowerShell**  
+Run this once to allow scripts, then try again:
+```
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 
-**PostgreSQL connection refused**
-```bash
-docker compose exec postgres pg_isready -U etl_user
-# Should print: /var/run/postgresql:5432 - accepting connections
+**No staging file after running the extractor**  
+Check the terminal output for errors. If you see a connection error, confirm your internet is working — FakeStoreAPI is free and needs no authentication.
+
+**Tiki scraper returns 0 records**  
+Tiki may be rate-limiting your IP. Wait 5–10 minutes and try again. For development, FakeStore is the recommended source.
+
+**Docker: Airflow UI not reachable at localhost:8080**  
+```
+docker compose ps
+docker compose logs airflow-webserver
 ```
 
-**Staging file not created after running extractor**
-```bash
-# Check for errors in the run
-python -m etl.extractor 2>&1 | head -50
-
-# Confirm staging directory exists
-ls -la staging/
+**Docker: PostgreSQL connection refused**  
 ```
-
-**Tiki scraper returns 0 records**
-Tiki's API may return empty results when:
-- Your IP is rate-limited (wait 10 min, retry)
-- The `x-guest-token` header format changed (check Tiki network requests in browser DevTools)
-- Use FakeStore for development; Tiki is for live demo only
-
----
-
-## Changelog
-
-### v0.1.0-sprint1
-- Docker Compose stack: Airflow + PostgreSQL + Metabase
-- PostgreSQL schema: `products_market`, `pipeline_runs`, `rejected_records`
-- `FakeStoreExtractor`: full extraction with retry, atomic staging write
-- `TikiScraper`: paginated scraping with User-Agent rotation (bonus)
-- `@retry_with_backoff`: exponential backoff 30 s / 60 s / 120 s with jitter
-- 84 unit tests (0 failures), all HTTP mocked
+docker exec ecommerce_postgres pg_isready -U etl_user
+```
