@@ -83,7 +83,7 @@ transformed_columns:
   source:
     type: string
     nullable: false
-    allowed_values: ["fakestore_api", "tiki_api", "shopee_scrape"]
+    allowed_values: ["fakestore_api", "tiki_scrape", "shopee_scrape"]
   source_url:
     type: string
     nullable: true

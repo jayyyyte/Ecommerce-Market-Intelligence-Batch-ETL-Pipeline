@@ -18,9 +18,9 @@ Product detail endpoint (optional enrichment):
     GET https://tiki.vn/api/v2/products/<product_id>
 
 This approach is:
-  ✅ More reliable than HTML scraping (no JS rendering needed)
-  ✅ Structured data — no fragile CSS selector maintenance
-  ✅ Still demonstrates requests + real market data for demo
+- More reliable than HTML scraping (no JS rendering needed)
+- Structured data — no fragile CSS selector maintenance
+- Still demonstrates requests + real market data for demo
 
 HTML parsing with BeautifulSoup is used as a fallback for fields not
 available in the listing API response (e.g., detailed specs, stock status
@@ -50,7 +50,10 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import requests
-from bs4 import BeautifulSoup
+try:
+    from bs4 import BeautifulSoup
+except ImportError:  # pragma: no cover - depends on local environment
+    BeautifulSoup = None  # type: ignore[assignment]
 
 from etl.extractor import BaseExtractor
 from utils.retry import (
@@ -308,7 +311,7 @@ class TikiScraper(BaseExtractor):
 
         return products
 
-    def _fetch_product_detail_html(self, product_url: str) -> BeautifulSoup | None:
+    def _fetch_product_detail_html(self, product_url: str) -> Any | None:
         """
         Fetch and parse the HTML of a product detail page with BeautifulSoup.
 
@@ -317,6 +320,13 @@ class TikiScraper(BaseExtractor):
 
         Returns None on any error — callers must handle gracefully.
         """
+        if BeautifulSoup is None:
+            logger.warning(
+                "[tiki] BeautifulSoup unavailable; skipping detail page fetch for %s",
+                product_url,
+            )
+            return None
+
         try:
             self._rotate_user_agent()
             response = self._session.get(product_url, timeout=20)
