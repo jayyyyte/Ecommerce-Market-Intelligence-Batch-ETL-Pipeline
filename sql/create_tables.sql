@@ -23,6 +23,10 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     error_message     TEXT          DEFAULT NULL
 );
 
+-- Backfill additive columns for databases created before the current DDL.
+ALTER TABLE pipeline_runs
+    ADD COLUMN IF NOT EXISTS data_quality_score NUMERIC(5,2) DEFAULT NULL;
+
 -- Prevent two DAG runs logging for the same logical execution_date
 CREATE UNIQUE INDEX IF NOT EXISTS uq_pipeline_runs_dag_date
     ON pipeline_runs (dag_id, execution_date);
