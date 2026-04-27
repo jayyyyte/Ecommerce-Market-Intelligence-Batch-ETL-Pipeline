@@ -26,7 +26,7 @@
 | Orchestration | Apache Airflow 2.7.3 (LocalExecutor) |
 | Data processing | Pandas 2.2, (PySpark optional) |
 | Database | PostgreSQL 15 |
-| ORM / DB access | SQLAlchemy 2.0, psycopg2-binary |
+| ORM / DB access | SQLAlchemy 1.4, psycopg2-binary |
 | Schema validation | Pandera 0.20 |
 | HTTP client | requests 2.31 |
 | Alerting | Slack Incoming Webhooks |
@@ -368,6 +368,13 @@ docker exec airflow_scheduler airflow dags backfill -s 2025-06-01 -e 2025-06-14 
 ```
 python -m pytest tests\ -v
 python -m pytest tests\ --cov=etl --cov-report=html
+```
+
+DB-backed loader and integration tests require `TEST_DATABASE_URL` to point to a dedicated PostgreSQL database. Without it, those tests are skipped:
+```
+$env:TEST_DATABASE_URL="postgresql+psycopg2://etl_user:etl_password@localhost:5432/ecommerce_db_test"
+python -m pytest tests\test_loader.py -q
+python -m pytest tests\test_integration.py -q
 ```
 
 **Testing inside Docker**
