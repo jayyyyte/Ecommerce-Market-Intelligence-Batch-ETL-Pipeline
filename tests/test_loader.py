@@ -143,7 +143,7 @@ def test_log_run_start_inserts_running_row(loader: DataLoader) -> None:
             {"run_id": run_id},
         ).mappings().one()
 
-    assert row["run_id"] == run_id
+    assert str(row["run_id"]) == run_id
     assert row["dag_id"] == "test_dag"
     assert row["execution_date"].isoformat() == "2026-04-21"
     assert row["status"] == "RUNNING"
@@ -282,7 +282,7 @@ def test_load_products_updates_only_mutable_columns(
     assert float(row["rating"]) == pytest.approx(4.8)
     assert row["review_count"] == 99
     assert row["stock_status"] == "out_of_stock"
-    assert row["pipeline_run_id"] == second_run_id
+    assert str(row["pipeline_run_id"]) == second_run_id
 
 
 def test_load_rejected_inserts_rows_with_current_run_id(
@@ -300,8 +300,54 @@ def test_load_rejected_inserts_rows_with_current_run_id(
         ).mappings().one()
 
     assert inserted == 1
-    assert row["run_id"] == run_id
+    assert str(row["run_id"]) == run_id
     assert row["rejection_reason"] == "null_product_id"
+
+
+def test_run_load_replaces_rejected_rows_for_same_run_id(
+    loader: DataLoader,
+    clean_df: pd.DataFrame,
+    rejected_df: pd.DataFrame,
+) -> None:
+    run_id = str(uuid.uuid4())
+    empty_clean_df = clean_df.iloc[0:0].copy()
+
+    loader.run_load(
+        empty_clean_df,
+        rejected_df,
+        run_id=run_id,
+        dag_id="test_dag",
+        execution_date="2026-04-21",
+        rows_extracted=1,
+        rows_transformed=0,
+        quality_score=0.0,
+    )
+
+    replacement_rejected_df = rejected_df.copy()
+    replacement_rejected_df.loc[0, "rejection_reason"] = "invalid_price"
+    replacement_rejected_df.at[0, "raw_data"] = {"product_id": "sku-1", "price": -1}
+
+    loader.run_load(
+        empty_clean_df,
+        replacement_rejected_df,
+        run_id=run_id,
+        dag_id="test_dag",
+        execution_date="2026-04-21",
+        rows_extracted=1,
+        rows_transformed=0,
+        quality_score=0.0,
+    )
+
+    with loader.engine.connect() as connection:
+        rows = connection.execute(
+            sa.text(
+                "SELECT rejection_reason FROM rejected_records "
+                "WHERE run_id = :run_id ORDER BY id"
+            ),
+            {"run_id": run_id},
+        ).mappings().all()
+
+    assert [row["rejection_reason"] for row in rows] == ["invalid_price"]
 
 
 def test_log_run_end_updates_status_counts_and_error(loader: DataLoader) -> None:
@@ -501,3 +547,17 @@ def test_coerce_datetime_treats_naive_iso_strings_as_utc(
     coerced = loader._coerce_datetime("2026-04-21T00:00:00")
 
     assert coerced.isoformat() == "2026-04-21T00:00:00+00:00"
+
+
+def test_coerce_execution_date_accepts_iso_datetime_strings(
+    loader_cfg: PipelineConfig,
+) -> None:
+    engine = sa.create_engine("sqlite://")
+    loader = DataLoader(engine, loader_cfg)
+
+    assert loader._coerce_execution_date("2026-05-02T00:00:00.000").isoformat() == (
+        "2026-05-02"
+    )
+    assert loader._coerce_execution_date("2026-05-02T00:00:00Z").isoformat() == (
+        "2026-05-02"
+    )

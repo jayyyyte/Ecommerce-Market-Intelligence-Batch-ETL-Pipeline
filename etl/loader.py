@@ -172,6 +172,18 @@ class DataLoader:
 
         return len(records)
 
+    def delete_rejected_for_run(
+        self,
+        run_id: str,
+        connection: Connection | None = None,
+    ) -> int:
+        """Remove rejected rows for a run before replaying an idempotent load."""
+        statement = sa.delete(rejected_records).where(rejected_records.c.run_id == run_id)
+        context = self._connection_context(connection)
+        with context as active_connection:
+            result = active_connection.execute(statement)
+        return int(result.rowcount or 0)
+
     def log_run_end(
         self,
         run_id: str,
@@ -246,6 +258,7 @@ class DataLoader:
         try:
             with self.engine.begin() as connection:
                 inserted, updated = self.load_products(clean_df, run_id, connection=connection)
+                self.delete_rejected_for_run(run_id, connection=connection)
                 rejected_count = self.load_rejected(
                     rejected_df, run_id, connection=connection
                 )
@@ -409,7 +422,11 @@ class DataLoader:
             return value.date()
         if isinstance(value, datetime):
             return value.date()
-        return date.fromisoformat(str(value))
+        text = str(value)
+        try:
+            return date.fromisoformat(text)
+        except ValueError:
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
 
     def _coerce_datetime(self, value: Any) -> datetime:
         if value is None or (isinstance(value, float) and pd.isna(value)):
