@@ -1,5 +1,3 @@
-version: "3.8"
-
 x-airflow-common: &airflow-common
   build:
     context: .
@@ -23,6 +21,7 @@ x-airflow-common: &airflow-common
   volumes:
     - ./dags:/opt/airflow/dags
     - ./etl:/opt/airflow/etl
+    - ./utils:/opt/airflow/utils
     - ./scripts:/opt/airflow/scripts      # ← scripts/ now available inside container
     - ./tests:/opt/airflow/tests
     - ./sql:/opt/airflow/sql
@@ -72,7 +71,7 @@ services:
           --role Admin \
           --email ${AIRFLOW_ADMIN_EMAIL} \
           --password ${AIRFLOW_ADMIN_PASSWORD} && \
-        echo "✅  Airflow initialised." && \
+        echo "Airflow initialised." && \
         python /opt/airflow/scripts/init_db.py && \
         python /opt/airflow/scripts/setup_airflow_connections.py
     restart: "no"

@@ -19,8 +19,7 @@ Usage:
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +70,7 @@ class PipelineConfig:
 
     # ── PostgreSQL ───────────────────────────────────────────────────────────
     postgres_user: str = "etl_user"
-    postgres_password: str = "etl_password"
+    postgres_password: str = ""
     postgres_host: str = "postgres"
     postgres_port: str = "5432"
     postgres_db: str = "ecommerce_db"
@@ -141,7 +140,7 @@ def get_config() -> PipelineConfig:
 
         # PostgreSQL
         postgres_user=_get("POSTGRES_USER", "etl_user"),
-        postgres_password=_get("POSTGRES_PASSWORD", "etl_password"),
+        postgres_password=_get("POSTGRES_PASSWORD", ""),
         postgres_host=_get("POSTGRES_HOST", "postgres"),
         postgres_port=_get("POSTGRES_PORT", "5432"),
         postgres_db=_get("POSTGRES_DB", "ecommerce_db"),
