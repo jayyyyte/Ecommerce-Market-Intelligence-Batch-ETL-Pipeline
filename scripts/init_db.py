@@ -26,8 +26,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SQL_FILE = PROJECT_ROOT / "sql" / "create_tables.sql"
 
-# Prefer environment variables already set (Docker / .env); fall back to
-# sensible defaults that match .env.example.
+# Prefer environment variables already set (Docker / .env); do not provide a
+# password fallback so credentials stay outside source code.
 try:
     from dotenv import load_dotenv
     load_dotenv(PROJECT_ROOT / ".env", override=False)
@@ -43,7 +43,7 @@ from sqlalchemy.engine import Engine
 # ---------------------------------------------------------------------------
 def get_engine() -> Engine:
     user     = os.environ.get("POSTGRES_USER",     "etl_user")
-    password = os.environ.get("POSTGRES_PASSWORD", "etl_password")
+    password = os.environ.get("POSTGRES_PASSWORD", "")
     host     = os.environ.get("POSTGRES_HOST",     "localhost")
     port     = os.environ.get("POSTGRES_PORT",     "5432")
     db       = os.environ.get("POSTGRES_DB",       "ecommerce_db")

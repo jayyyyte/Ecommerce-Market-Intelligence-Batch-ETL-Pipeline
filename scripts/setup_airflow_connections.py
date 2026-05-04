@@ -51,7 +51,7 @@ def setup_connections(overwrite: bool) -> None:
             host=os.environ.get("POSTGRES_HOST", "postgres"),
             schema=os.environ.get("POSTGRES_DB", "ecommerce_db"),
             login=os.environ.get("POSTGRES_USER", "etl_user"),
-            password=os.environ.get("POSTGRES_PASSWORD", "etl_password"),
+            password=os.environ.get("POSTGRES_PASSWORD", ""),
             port=int(os.environ.get("POSTGRES_PORT", "5432")),
         )
 
