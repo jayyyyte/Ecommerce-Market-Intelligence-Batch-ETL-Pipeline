@@ -37,6 +37,7 @@ def test_dag_shape_and_runtime_config() -> None:
     assert dag.dag_id == "ecommerce_market_etl"
     assert dag.catchup is False
     assert dag.max_active_runs == 1
+    assert dag.default_args["on_failure_callback"] == dag_module.notify_on_failure
     assert set(dag.task_ids) == {
         "extract_data",
         "validate_schema",
@@ -49,6 +50,7 @@ def test_dag_shape_and_runtime_config() -> None:
     assert dag.task_dict["validate_schema"].downstream_task_ids == {"transform_data"}
     assert dag.task_dict["transform_data"].downstream_task_ids == {"load_to_db"}
     assert dag.task_dict["load_to_db"].downstream_task_ids == {"notify_status"}
+    assert dag.task_dict["notify_status"].on_failure_callback is None
 
 
 def test_deterministic_run_id_is_stable_for_same_date() -> None:
@@ -180,3 +182,48 @@ def test_load_to_db_reads_artifacts_and_archives_raw(monkeypatch, tmp_path: Path
     assert result["status"] == "SUCCESS"
     assert result["rows_loaded"] == 1
     assert result["archived_path"].endswith("raw_products.json")
+
+
+def test_notify_status_raises_when_upstream_failed(monkeypatch) -> None:
+    class DummyTaskState:
+        def __init__(self, task_id: str, state: str) -> None:
+            self.task_id = task_id
+            self.state = state
+
+    class DummyDagRun:
+        def get_task_instances(self):
+            return [
+                DummyTaskState("extract_data", "success"),
+                DummyTaskState("load_to_db", "failed"),
+                DummyTaskState("notify_status", "success"),
+            ]
+
+    class FakeNotifier:
+        def __init__(self) -> None:
+            self.failure_calls = []
+
+        def send_failure(self, context, **kwargs) -> None:
+            self.failure_calls.append(kwargs)
+
+    marked = {}
+    notifier = FakeNotifier()
+
+    def fake_mark_failed_run(context, run_id, execution_date, error_message, metrics):
+        marked["run_id"] = run_id
+        marked["execution_date"] = execution_date
+        marked["error_message"] = error_message
+
+    monkeypatch.setattr(dag_module, "get_config", lambda: PipelineConfig())
+    monkeypatch.setattr(dag_module, "PipelineNotifier", lambda cfg: notifier)
+    monkeypatch.setattr(dag_module, "_mark_failed_run", fake_mark_failed_run)
+
+    with pytest.raises(dag_module.AirflowException, match="load_to_db"):
+        dag_module.notify_status(
+            ds="2026-04-21",
+            dag_run=DummyDagRun(),
+            ti=DummyTI(),
+        )
+
+    assert marked["execution_date"] == "2026-04-21"
+    assert "load_to_db" in marked["error_message"]
+    assert notifier.failure_calls[0]["failed_tasks"] == ["load_to_db"]

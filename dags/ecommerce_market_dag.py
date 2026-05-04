@@ -13,6 +13,7 @@ from typing import Any
 import pandas as pd
 import sqlalchemy as sa
 from airflow import DAG
+from airflow.exceptions import AirflowException
 from airflow.operators.python import PythonOperator
 from airflow.utils.trigger_rule import TriggerRule
 
@@ -23,7 +24,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from etl.config import PipelineConfig, get_config
 from etl.extractor import FakeStoreExtractor
 from etl.loader import DataLoader
-from etl.notifier import PipelineNotifier
+from etl.notifier import PipelineNotifier, notify_on_failure
 from etl.transformer import DataTransformer
 
 logger = logging.getLogger(__name__)
@@ -199,7 +200,7 @@ def notify_status(**context: Any) -> dict[str, Any]:
             failed_tasks=failed_tasks,
             error_message=error_message,
         )
-        return {"status": "FAILED", "run_id": run_id, "failed_tasks": failed_tasks}
+        raise AirflowException(error_message)
 
     status = str(metrics.get("status", "SUCCESS"))
     notifier.send_success(
@@ -325,18 +326,19 @@ default_args = {
     "retries": 3,
     "retry_delay": timedelta(minutes=5),
     "retry_exponential_backoff": True,
+    "on_failure_callback": notify_on_failure,
 }
 
 
 with DAG(
     dag_id=DAG_ID,
-    description="Daily E-Commerce market intelligence ETL pipeline.",
+    description="Daily E-Commerce market ETL pipeline.",
     default_args=default_args,
     start_date=datetime(2026, 1, 1),
     schedule_interval="0 0 * * *",
     catchup=False,
     max_active_runs=1,
-    tags=["ecommerce", "market-intelligence", "sprint-3"],
+    tags=["ecommerce", "sprint-3"],
 ) as dag:
     extract_task = PythonOperator(
         task_id="extract_data",
@@ -368,6 +370,7 @@ with DAG(
         trigger_rule=TriggerRule.ALL_DONE,
         execution_timeout=timedelta(minutes=5),
         retries=0,
+        on_failure_callback=None,
     )
 
     extract_task >> validate_task >> transform_task >> load_task >> notify_task
